@@ -135,6 +135,8 @@ def find_and_replace_text(doc, old_text, new_text):
     """
     Find and replace text throughout the document.
     
+    This function properly handles text that spans across multiple runs (formatted text segments).
+    
     Args:
         doc: Document object
         old_text: Text to find
@@ -145,24 +147,71 @@ def find_and_replace_text(doc, old_text, new_text):
     """
     count = 0
     
+    # Helper function to replace text in a paragraph that may span multiple runs
+    def replace_in_paragraph(para):
+        replacements = 0
+        paragraph_text = para.text
+        
+        if old_text not in paragraph_text:
+            return 0
+        
+        # Count how many replacements we'll make
+        replacement_count = paragraph_text.count(old_text)
+        if replacement_count == 0:
+            return 0
+        
+        # If the text is contained within a single run, use simple replacement
+        simple_replacement_done = False
+        for run in para.runs:
+            if old_text in run.text:
+                # Count occurrences in this run
+                run_count = run.text.count(old_text)
+                run.text = run.text.replace(old_text, new_text)
+                replacements += run_count
+                simple_replacement_done = True
+        
+        # If simple replacement worked (text didn't span runs), return
+        if simple_replacement_done and old_text not in para.text:
+            return replacements
+        
+        # Handle complex case where text spans multiple runs
+        # Use a simpler but more reliable approach for cross-run replacement
+        full_text = para.text
+        
+        # If we still have text to replace (meaning it spans runs), use paragraph-level replacement
+        if old_text in full_text:
+            new_full_text = full_text.replace(old_text, new_text)
+            replacement_count = full_text.count(old_text)
+            
+            # Clear all runs and create a single run with the new text
+            # This preserves the replacement but loses some formatting
+            for run in para.runs:
+                run.clear()
+            
+            # Remove all runs except the first one
+            while len(para.runs) > 1:
+                para._element.remove(para.runs[-1]._element)
+            
+            # Set the text in the first run
+            if para.runs:
+                para.runs[0].text = new_full_text
+            else:
+                para.add_run(new_full_text)
+            
+            replacements += replacement_count
+        
+        return replacements
+    
     # Search in paragraphs
     for para in doc.paragraphs:
-        if old_text in para.text:
-            for run in para.runs:
-                if old_text in run.text:
-                    run.text = run.text.replace(old_text, new_text)
-                    count += 1
+        count += replace_in_paragraph(para)
     
     # Search in tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    if old_text in para.text:
-                        for run in para.runs:
-                            if old_text in run.text:
-                                run.text = run.text.replace(old_text, new_text)
-                                count += 1
+                    count += replace_in_paragraph(para)
     
     return count
 
